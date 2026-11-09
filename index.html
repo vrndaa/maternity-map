@@ -1,0 +1,389 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>How far to give birth?</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link href="https://api.mapbox.com/mapbox-gl-js/v3.9.0/mapbox-gl.css" rel="stylesheet">
+  <script src="https://api.mapbox.com/mapbox-gl-js/v3.9.0/mapbox-gl.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@turf/turf@7.1.0/turf.min.js"></script>
+  <!-- Fonts: Newsreader (headlines) + DM Mono (everything else), from Google Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Newsreader:opsz,wght@6..72,400;6..72,500;6..72,600&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg: #0E0E0E;       /* background (black) */
+      --pink: #E86AA6;     /* counties */
+      --yellow: #FFE066;   /* soft highlighter yellow, sits well with black and pink */
+    }
+    body { margin: 0; background: var(--bg); font-family: 'DM Mono', monospace; }
+    button { font-family: inherit; }
+    .serif { font-family: 'Newsreader', Georgia, serif; }
+    #map { position: absolute; top: 0; bottom: 0; width: 100%; }
+    #map .mapboxgl-canvas-container { cursor: crosshair; }
+    .mapboxgl-ctrl-group { border-radius: 0 !important; }
+
+    /* All boxes: filled with the background color, no outline */
+    .box { background: var(--bg); color: #fff; border-radius: 0; padding: 20px 22px; }
+
+    /* Title box, top left (always visible) */
+    #title { position: absolute; top: 20px; left: 20px; max-width: 440px; pointer-events: none; }
+    #title h1 { font-family: 'Newsreader', Georgia, serif; font-weight: 500; font-size: 44px; line-height: 1.04; margin: 0; letter-spacing: -0.02em; }
+    #title p { font-size: 12px; letter-spacing: 0.1em; color: #fff; margin: 14px 0 0; }
+
+    /* Result box + reset, top right (hidden until the first click) */
+    #result { position: absolute; top: 20px; right: 20px; width: 330px; display: none; }
+    #sentence { font-size: 16px; line-height: 1.5; margin: 0; }
+    #time { display: block; font-family: 'Newsreader', Georgia, serif; font-weight: 500; font-size: 40px; line-height: 1.1; margin-top: 4px; white-space: nowrap; }
+    #where { font-size: 15px; margin: 14px 0 0; line-height: 1.7; }
+    .hl { background: var(--yellow); color: #000; padding: 1px 5px; font-weight: 500; }
+    #reset { float: right; margin-top: 10px; background: var(--bg); color: #fff; border: none;
+             border-radius: 0; font-size: 13px; font-weight: 500; letter-spacing: 0.1em; padding: 8px 16px; cursor: pointer; }
+    #reset:hover { background: #fff; color: #000; }
+
+    /* Key, inside the title box under "click anywhere" */
+    #key { margin-top: 14px; font-size: 14px; line-height: 1.35; display: flex; gap: 20px; }
+    #key .row { display: flex; gap: 8px; align-items: center; }
+    #key .sw { width: 13px; height: 13px; flex: none; }
+
+    /* Plain-text footer: sources bottom left (next to the Mapbox logo), desert link bottom right */
+    .foot { position: absolute; bottom: 12px; color: #fff; font-size: 12px; text-shadow: 0 0 4px #000, 0 0 2px #000; }  /* soft shadow keeps it readable over pink */
+    #sources { left: 110px; }
+    #what { right: 60px; bottom: 10px; background: var(--bg); border: none; padding: 6px 10px; cursor: pointer;
+            text-decoration: underline; text-underline-offset: 3px; text-shadow: none; }
+
+    /* Pop-up explaining maternity care deserts (hidden until the link is clicked) */
+    #explain { position: absolute; right: 20px; bottom: 40px; width: 320px; display: none;
+               background: var(--bg); color: #fff; padding: 20px 22px; font-size: 12px; line-height: 1.55; width: 360px; }
+    #explain h3 { font-family: 'Newsreader', Georgia, serif; font-weight: 500; font-size: 24px; line-height: 1.1; margin: 0 24px 10px 0; }
+    #explain p { margin: 0 0 8px; }
+    #explain ul { margin: 0 0 8px; padding-left: 16px; }
+    #explain li { margin-bottom: 4px; }
+    #explain .note { opacity: 0.75; margin: 0; }
+    #close { position: absolute; top: 10px; right: 12px; background: none; border: none; color: #fff;
+             font-size: 20px; line-height: 1; cursor: pointer; padding: 0; }
+  </style>
+</head>
+<body>
+  <div id="map"></div>
+
+  <div id="title" class="box">
+    <h1>How far to the nearest place to give birth?</h1>
+    <p>CLICK ANYWHERE TO FIND OUT</p>
+    <div id="key">
+      <div class="row"><span class="sw" style="background:#B8245E"></span><span>Rural county</span></div>
+      <div class="row"><span class="sw" style="background:#fff;border-radius:50%;width:9px;height:9px"></span><span>Birthing hospital</span></div>
+    </div>
+  </div>
+
+  <div id="result">
+    <div class="box">
+      <p id="sentence">A one-way trip to the closest hospital is <span id="time"></span></p>
+      <p id="where"></p>
+    </div>
+    <button id="reset">RESET</button>
+  </div>
+
+  <div id="sources" class="foot">Sources: March of Dimes 2026, USDA, CMS. Drive times: © Mapbox © OpenStreetMap</div>
+  <button id="what" class="foot">What is a maternity care desert?</button>
+
+  <div id="explain">
+    <button id="close" aria-label="Close">&times;</button>
+    <h3>What is a maternity care desert?</h3>
+    <p>A county with no hospital or birth center offering obstetric care, and no obstetric clinicians
+       (OB-GYNs, certified nurse midwives, or family doctors who deliver babies).</p>
+    <p>March of Dimes sorts every county into one of four levels:</p>
+    <ul>
+      <li><b>Maternity care desert:</b> no birthing facility and no obstetric clinicians</li>
+      <li><b>Low access:</b> fewer than 2 birthing facilities and fewer than 60 obstetric clinicians per 10,000 births, with 10%+ of women uninsured</li>
+      <li><b>Moderate access:</b> the same, but under 10% of women uninsured</li>
+      <li><b>Full access:</b> 2+ birthing facilities, or 60+ obstetric clinicians per 10,000 births</li>
+    </ul>
+    <p class="note">These labels describe what's inside a county line. The drive time shows how far the nearest birthing hospital really is. Rural = USDA Rural-Urban Continuum Codes 7 to 9.</p>
+  </div>
+
+  <script>
+    mapboxgl.accessToken = 'pk.eyJ1IjoidnJuZGFhMTMiLCJhIjoiY213OWxqbmlkMDJnbDJ5b3BsNmwyNHZoMiJ9.d0dAcIXHsi97woAqD1OgNA';
+
+    // Your starting view. Keep the numbers you already tuned.
+    const START_CENTER = [-97.5, 38.3];
+    const START_ZOOM = 3.8;
+
+    // Fit the lower 48 to whatever screen size the visitor has, leaving room for the title box
+    const US_BOUNDS = [[-136.5, 20], [-71, 51]];   // tuned by eye: the Albers curve needs a wider box than the real lower-48 edges
+    function homeView() {
+      const narrow = window.innerWidth < 700;   // phones: title box sits on top, less side room
+      return {
+        padding: narrow ? { top: 260, bottom: 40, left: 10, right: 10 }
+                        : { top: 140, bottom: 50, left: 40, right: 40 },
+        duration: 0
+      };
+    }
+
+    // Palette from the watercolor
+    const BG = '#0E0E0E';   // background (black)
+    const PINK = '#E86AA6';
+    const PLUM = '#3D0F4F';
+
+    // State names from the first 2 digits of a county code
+    const STATES = {
+      '01':'Alabama','04':'Arizona','05':'Arkansas','06':'California','08':'Colorado','09':'Connecticut',
+      '10':'Delaware','11':'Washington, D.C.','12':'Florida','13':'Georgia','16':'Idaho','17':'Illinois',
+      '18':'Indiana','19':'Iowa','20':'Kansas','21':'Kentucky','22':'Louisiana','23':'Maine','24':'Maryland',
+      '25':'Massachusetts','26':'Michigan','27':'Minnesota','28':'Mississippi','29':'Missouri','30':'Montana',
+      '31':'Nebraska','32':'Nevada','33':'New Hampshire','34':'New Jersey','35':'New Mexico','36':'New York',
+      '37':'North Carolina','38':'North Dakota','39':'Ohio','40':'Oklahoma','41':'Oregon','42':'Pennsylvania',
+      '44':'Rhode Island','45':'South Carolina','46':'South Dakota','47':'Tennessee','48':'Texas','49':'Utah',
+      '50':'Vermont','51':'Virginia','53':'Washington','54':'West Virginia','55':'Wisconsin','56':'Wyoming'
+    };
+
+    // ---------- 1. A blank black map, locked in place ----------
+    const map = new mapboxgl.Map({
+      container: 'map',
+      style: {
+        version: 8,
+        sources: {},
+        layers: [{ id: 'background', type: 'background', paint: { 'background-color': BG } }]
+      },
+      projection: { name: 'albers', center: [-96, 37.5], parallels: [29.5, 45.5] },
+      center: START_CENTER,
+      zoom: START_ZOOM,
+      // People can drag and zoom, but not rotate or tilt, and the map stays around the US
+      dragPan: true, scrollZoom: true, touchZoomRotate: true, keyboard: true,
+      boxZoom: false, dragRotate: false, touchPitch: false,
+      doubleClickZoom: false,               // double-click would also count as two "find out" clicks
+      minZoom: 3, maxZoom: 10,
+      maxBounds: [[-175, 0], [-20, 72]],    // loose limit: you can't drag the US completely off-screen
+      attributionControl: false
+    });
+
+    map.once('load', () => map.fitBounds(US_BOUNDS, homeView()));   // start on the whole US, sized to the screen
+    map.touchZoomRotate.disableRotation();   // pinch to zoom on phones, but no spinning
+    map.addControl(new mapboxgl.NavigationControl({ showCompass: false }), 'bottom-right');   // + / - buttons
+
+    map.on('load', () => {
+
+      // ---------- 1b. One solid pink shape of the whole country, under everything ----------
+      // Fills lakes, river gaps and hairline gaps between counties,
+      // so the black background doesn't show through as black patches
+      map.addSource('land', { type: 'geojson', data: 'land.geojson' });
+      map.addLayer({ id: 'land-fill', type: 'fill', source: 'land', paint: { 'fill-color': PINK } });
+
+      // ---------- 2. Counties ----------
+      map.addSource('counties', { type: 'geojson', data: 'counties.geojson' });
+
+      // 2a. Pink fill for every county (also what detects clicks)
+      map.addLayer({
+        id: 'counties-fill', type: 'fill', source: 'counties',
+        paint: { 'fill-color': PINK }
+      });
+
+      // 2a-2. Rural counties filled deep rose
+      map.addLayer({
+        id: 'rural-fill', type: 'fill', source: 'counties',
+        filter: ['==', ['get', 'area_type'], 'Rural'],
+        paint: { 'fill-color': '#B8245E' }
+      });
+      // A hairline of the same rose around rural counties, so seams between two rural counties don't show pink
+      map.addLayer({
+        id: 'rural-seams', type: 'line', source: 'counties',
+        filter: ['==', ['get', 'area_type'], 'Rural'],
+        paint: { 'line-color': '#B8245E', 'line-width': 0.6 }
+      });
+
+      // 2b. White county lines: hidden on the national view, switched on after a click
+      map.addLayer({
+        id: 'counties-line', type: 'line', source: 'counties',
+        layout: { visibility: 'none' },
+        paint: { 'line-color': '#fff', 'line-width': 0.3, 'line-opacity': 1 }
+      });
+
+      // ---------- 3. White state lines and country outline ----------
+      // Thin on the national view, thicker once you're zoomed into a state
+      map.addSource('states', { type: 'geojson', data: 'states.geojson' });
+      map.addLayer({
+        id: 'states-line', type: 'line', source: 'states',
+        paint: {
+          'line-color': '#fff',
+          'line-width': ['interpolate', ['linear'], ['zoom'],
+            4, ['match', ['get', 'kind'], 'coast', 0.8, 0.6],    // national view
+            7, ['match', ['get', 'kind'], 'coast', 2, 1.5]       // zoomed into a state
+          ]
+        }
+      });
+
+      // ---------- 4. Hospitals: small plain white dots (hidden until someone clicks) ----------
+      map.addSource('hospitals', { type: 'geojson', data: 'hospitals.geojson' });
+      map.addLayer({
+        id: 'hospitals-dots', type: 'circle', source: 'hospitals',
+        layout: { visibility: 'none' },
+        paint: { 'circle-radius': 3, 'circle-color': '#fff' }
+      });
+
+      // ---------- 5. Arcs to the 2 closest hospitals (empty until a click) ----------
+      map.addSource('arcs', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });
+      map.addLayer({
+        id: 'arcs', type: 'line', source: 'arcs',
+        layout: { 'line-cap': 'round' },
+        paint: {
+          'line-color': '#fff',
+          'line-width': ['case', ['get', 'closest'], 2, 1.5],     // closest a little heavier
+          'line-opacity': 1
+        }
+      }, 'hospitals-dots');   // arcs sit underneath the dots
+    });
+
+    // ---------- 6. Hospital list for the distance math ----------
+    let hospitals;
+    fetch('hospitals.geojson').then(r => r.json()).then(d => { hospitals = d; });
+
+    // Each state's bounding box, built from its counties (used to zoom to the state on click)
+    const stateBounds = {};
+    fetch('counties.geojson').then(r => r.json()).then(d => {
+      d.features.forEach(f => {
+        const st = f.properties.fips.slice(0, 2);   // first 2 digits of a county code = the state
+        const [w, s, e, n] = turf.bbox(f);
+        const b = stateBounds[st];
+        stateBounds[st] = b ? [Math.min(b[0], w), Math.min(b[1], s), Math.max(b[2], e), Math.max(b[3], n)] : [w, s, e, n];
+      });
+    });
+
+    // ---------- 7. Helpers ----------
+
+    // A curved line between two points
+    function curve(from, to) {
+      const [x1, y1] = from, [x2, y2] = to;
+      const BEND = 0.6;   // how dramatic the curve is: 0.25 = gentle, 0.6 = big network-map swoop
+      const cx = (x1 + x2) / 2 - (y2 - y1) * BEND;
+      const cy = (y1 + y2) / 2 + (x2 - x1) * BEND;
+      const pts = [];
+      for (let t = 0; t <= 1.0001; t += 0.05) {
+        pts.push([
+          (1 - t) ** 2 * x1 + 2 * (1 - t) * t * cx + t ** 2 * x2,
+          (1 - t) ** 2 * y1 + 2 * (1 - t) * t * cy + t ** 2 * y2
+        ]);
+      }
+      return pts;
+    }
+
+    // Seconds -> "1 hr 34 min"
+    function niceTime(seconds) {
+      const mins = Math.max(1, Math.round(seconds / 60));
+      return mins >= 60 ? `${Math.floor(mins / 60)} hr ${mins % 60} min` : `${mins} min`;
+    }
+
+    // Ask Mapbox for the real driving time (in seconds), one way
+    async function driveSeconds(from, to) {
+      const url = `https://api.mapbox.com/directions/v5/mapbox/driving/` +
+                  `${from[0]},${from[1]};${to[0]},${to[1]}?overview=false&access_token=${mapboxgl.accessToken}`;
+      const res = await fetch(url);
+      const data = await res.json();
+      return data.routes && data.routes.length ? data.routes[0].duration : null;
+    }
+
+    // Pin: plain white, no outline
+    function makePin() {
+      const el = document.createElement('div');
+      el.innerHTML = `
+        <svg width="14" height="24" viewBox="0 0 14 24">
+          <line x1="7" y1="10" x2="7" y2="23" stroke="#fff" stroke-width="2"/>
+          <circle cx="7" cy="7" r="5" fill="#fff"/>
+        </svg>`;
+      return new mapboxgl.Marker({ element: el, anchor: 'bottom' });
+    }
+
+    // ---------- 8. What happens on click ----------
+    let pin;
+    let clickId = 0;   // so a slow answer from an old click never overwrites a newer one
+
+    map.on('click', async (e) => {
+      if (!hospitals) return;
+
+      // Ignore clicks outside the US
+      const hit = map.queryRenderedFeatures(e.point, { layers: ['counties-fill'] });
+      if (!hit.length) return;
+
+      const myClick = ++clickId;
+      const here = [e.lngLat.lng, e.lngLat.lat];
+      const county = hit[0].properties;
+
+      // 3 closest by straight line (a river or mountain can make the straight-line winner slower to drive to)
+      const candidates = hospitals.features
+        .map(h => ({ h, miles: turf.distance(here, h.geometry.coordinates, { units: 'miles' }) }))
+        .sort((a, b) => a.miles - b.miles)
+        .slice(0, 3);
+
+      // Drop the pin
+      if (!pin) pin = makePin();
+      pin.setLngLat(here).addTo(map);
+
+      // Real drive times for those 3, then keep the 2 fastest
+      const times = await Promise.all(candidates.map(c => driveSeconds(here, c.h.geometry.coordinates).catch(() => null)));
+      if (myClick !== clickId) return;   // a newer click happened while we waited
+
+      candidates.forEach((c, i) => {
+        // If Mapbox can't find a route, fall back to a rough estimate (roads ~25% longer, ~50 mph)
+        c.seconds = times[i] ?? (c.miles * 1.25 / 50) * 3600;
+      });
+      const closestTwo = candidates.sort((a, b) => a.seconds - b.seconds).slice(0, 2);
+
+      // Arcs
+      map.getSource('arcs').setData({
+        type: 'FeatureCollection',
+        features: closestTwo.map((c, i) => ({
+          type: 'Feature',
+          properties: { closest: i === 0 },
+          geometry: { type: 'LineString', coordinates: curve(here, c.h.geometry.coordinates) }
+        }))
+      });
+
+      // Show hospital dots for this state only (plus the 2 closest, in case they're across the border)
+      map.setFilter('hospitals-dots', ['any',
+        ['==', ['get', 'st'], county.fips.slice(0, 2)],
+        ['in', ['get', 'id'], ['literal', closestTwo.map(c => c.h.properties.id)]]
+      ]);
+      map.setLayoutProperty('hospitals-dots', 'visibility', 'visible');
+      map.setLayoutProperty('counties-line', 'visibility', 'visible');
+
+      // Zoom to just the state that was clicked
+      const stateCode = county.fips.slice(0, 2);
+      const sb = stateBounds[stateCode];
+      if (sb) {
+        map.fitBounds([[sb[0], sb[1]], [sb[2], sb[3]]],
+          { padding: { top: 230, bottom: 50, left: 80, right: 380 }, maxZoom: 8, duration: 1200 });   // room for the boxes
+      }
+
+      // Result box: drive time, then one sentence naming the county and state,
+      // whether it's rural or urban, and (if so) that it's a maternity care desert
+      const place = county.label || `${county.county} County, ${STATES[stateCode] || county.state}`;
+      const kind = county.area_type === 'Rural' ? 'rural' : 'urban';
+      const desert = county.access === 'Maternity Care Desert';
+      document.getElementById('time').textContent = '≈' + niceTime(closestTwo[0].seconds);
+      document.getElementById('where').innerHTML = desert
+        ? `${place}<br><span class="hl">A ${kind} maternity care desert</span>`
+        : `${place}<br>A ${kind} county with maternity care`;
+      document.getElementById('result').style.display = 'block';
+    });
+
+    // ---------- 9. Reset ----------
+    document.getElementById('reset').addEventListener('click', () => {
+      clickId++;
+      if (pin) pin.remove();
+      map.getSource('arcs').setData({ type: 'FeatureCollection', features: [] });
+      map.setLayoutProperty('hospitals-dots', 'visibility', 'none');
+      map.setLayoutProperty('counties-line', 'visibility', 'none');
+      map.fitBounds(US_BOUNDS, { ...homeView(), duration: 1000 });
+      document.getElementById('result').style.display = 'none';
+    });
+
+    // ---------- 10. "What is a maternity care desert?" pop-up ----------
+    document.getElementById('what').addEventListener('click', () => {
+      document.getElementById('explain').style.display = 'block';
+    });
+    document.getElementById('close').addEventListener('click', () => {
+      document.getElementById('explain').style.display = 'none';
+    });
+  </script>
+</body>
+</html>
