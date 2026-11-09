@@ -34,6 +34,8 @@
     #title { position: absolute; top: 20px; left: 20px; max-width: 440px; pointer-events: none; }
     #title h1 { font-family: 'Newsreader', Georgia, serif; font-weight: 500; font-size: 44px; line-height: 1.04; margin: 0; letter-spacing: -0.02em; }
     #title p { font-size: 12px; letter-spacing: 0.1em; color: #fff; margin: 14px 0 0; }
+    /* Laptop-size screens: a slightly smaller title so the map gets more room */
+    @media (max-width: 1200px) { #title { max-width: 340px; padding: 16px 18px; } #title h1 { font-size: 34px; } }
 
     /* Result box + reset, top right (hidden until the first click) */
     #result { position: absolute; top: 20px; right: 20px; width: 330px; display: none; }
@@ -46,7 +48,7 @@
     #reset:hover { background: #fff; color: #000; }
 
     /* Key, inside the title box under "click anywhere" */
-    #key { margin-top: 14px; font-size: 14px; line-height: 1.35; display: flex; flex-wrap: wrap; gap: 10px 20px; }
+    #key { margin-top: 16px; font-size: 14px; line-height: 1.35; display: flex; flex-direction: column; gap: 8px; }   /* one item per line */
     #key .row { display: flex; gap: 8px; align-items: center; }
     #key .sw { width: 13px; height: 13px; flex: none; }
 
@@ -75,9 +77,9 @@
     <h1>How far to the nearest place to give birth?</h1>
     <p>CLICK ANYWHERE TO FIND OUT</p>
     <div id="key">
-     <div class="row"><span class="sw" style="background:#E86AA6"></span><span>Urban county</span></div>
+      <div class="row"><span class="sw" style="background:#E86AA6"></span><span>Urban county</span></div>
       <div class="row"><span class="sw" style="background:#B8245E"></span><span>Rural county</span></div>
-      <div class="row"><span class="sw" style="background:#fff;border-radius:50%;width:9px;height:9px"></span><span>Birthing hospital</span></div>
+      <div class="row"><span class="sw" style="background:#fff;border-radius:50%;width:9px;height:9px;margin:0 2px"></span><span>Birthing hospital</span></div>
     </div>
   </div>
 
@@ -110,19 +112,53 @@
   <script>
     mapboxgl.accessToken = window.MAPBOX_TOKEN;   // set in config.js
 
-    // Your starting view. Keep the numbers you already tuned.
+    // Starting view: size the lower 48 to fill whatever screen the visitor has
     const START_CENTER = [-97.5, 38.3];
     const START_ZOOM = 3.8;
 
-    // Fit the lower 48 to whatever screen size the visitor has, leaving room for the title box
-    const US_BOUNDS = [[-136.5, 20], [-71, 51]];   // tuned by eye: the Albers curve needs a wider box than the real lower-48 edges
-    function homeView() {
-      const narrow = window.innerWidth < 700;   // phones: title box sits on top, less side room
-      return {
-        padding: narrow ? { top: 260, bottom: 40, left: 10, right: 10 }
-                        : { top: 140, bottom: 50, left: 40, right: 40 },
-        duration: 0
-      };
+    // Points around the edge of the lower 48 (WA, CA, TX, FL, ME, the northern border...)
+    const L48_EDGE = [[-124.7, 48.4], [-124.4, 40.4], [-117.1, 32.5], [-106.5, 31.8], [-97.2, 25.9],
+                      [-80.0, 25.1], [-75.5, 35.2], [-67.0, 44.8], [-69.2, 47.4], [-95.2, 49.4], [-122.8, 49.0]];
+
+    // Two ways to leave room for the title box: map beside it, or map below it
+    function paddingOptions() {
+      const box = document.getElementById('title').getBoundingClientRect();
+      if (window.innerWidth < 700) return [{ top: box.bottom + 10, bottom: 40, left: 10, right: 10 }];   // phones: below
+      return [
+        { top: 30, bottom: 50, left: box.right + 10, right: 30 },    // beside the title box
+        { top: box.bottom + 10, bottom: 50, left: 30, right: 30 }    // below the title box
+      ];
+    }
+
+    // One step: zoom/center so the lower 48 fills the free space. Returns how much it had to change.
+    function fitStep(pad) {
+      const el = map.getContainer();
+      const pts = L48_EDGE.map(p => map.project(p));
+      const xs = pts.map(p => p.x), ys = pts.map(p => p.y);
+      const w = Math.max(...xs) - Math.min(...xs), h = Math.max(...ys) - Math.min(...ys);
+      const availW = el.clientWidth - pad.left - pad.right, availH = el.clientHeight - pad.top - pad.bottom;
+      const scale = Math.min(availW / w, availH / h);
+      // move the map so its middle sits in the middle of the free space
+      const cx = (Math.max(...xs) + Math.min(...xs)) / 2, cy = (Math.max(...ys) + Math.min(...ys)) / 2;
+      const tx = pad.left + availW / 2, ty = pad.top + availH / 2;
+      const c = map.project(map.getCenter());
+      map.jumpTo({ center: map.unproject([c.x + (cx - tx), c.y + (cy - ty)]) });
+      map.jumpTo({ zoom: Math.min(map.getZoom() + Math.log2(scale), 6) });
+      return Math.abs(Math.log2(scale)) + Math.abs(cx - tx) / 1000 + Math.abs(cy - ty) / 1000;
+    }
+
+    // Try each layout, keep the one where the map ends up biggest, then glide there
+    function goHome(duration) {
+      const start = { center: map.getCenter(), zoom: map.getZoom() };
+      let best = null;
+      for (const pad of paddingOptions()) {
+        map.jumpTo(start);
+        for (let i = 0; i < 6 && fitStep(pad) > 0.002; i++);
+        const cam = { center: map.getCenter(), zoom: map.getZoom() };
+        if (!best || cam.zoom > best.zoom) best = cam;
+      }
+      map.jumpTo(start);
+      map.easeTo({ ...best, duration });
     }
 
     // Palette from the watercolor
@@ -157,12 +193,12 @@
       dragPan: true, scrollZoom: true, touchZoomRotate: true, keyboard: true,
       boxZoom: false, dragRotate: false, touchPitch: false,
       doubleClickZoom: false,               // double-click would also count as two "find out" clicks
-      minZoom: 3, maxZoom: 10,
+      minZoom: 2, maxZoom: 10,
       maxBounds: [[-175, 0], [-20, 72]],    // loose limit: you can't drag the US completely off-screen
       attributionControl: false
     });
 
-    map.once('load', () => map.fitBounds(US_BOUNDS, homeView()));   // start on the whole US, sized to the screen
+    map.once('load', () => goHome(0));   // start on the whole US, sized to the screen
     map.touchZoomRotate.disableRotation();   // pinch to zoom on phones, but no spinning
     map.addControl(new mapboxgl.NavigationControl({ showCompass: false }), 'bottom-right');   // + / - buttons
 
@@ -363,10 +399,11 @@
       const place = county.label || `${county.county} County, ${STATES[stateCode] || county.state}`;
       const kind = county.area_type === 'Rural' ? 'rural' : 'urban';
       const desert = county.access === 'Maternity Care Desert';
+      const a = kind === 'urban' ? 'An' : 'A';   // "An urban", "A rural"
       document.getElementById('time').textContent = '≈' + niceTime(closestTwo[0].seconds);
       document.getElementById('where').innerHTML = desert
-        ? `${place}<br><span class="hl">A ${kind} maternity care desert</span>`
-        : `${place}<br>A ${kind} county with maternity care`;
+        ? `${place}<br><span class="hl">${a} ${kind} maternity care desert</span>`
+        : `${place}<br>${a} ${kind} county with maternity care`;
       document.getElementById('result').style.display = 'block';
     });
 
@@ -377,7 +414,7 @@
       map.getSource('arcs').setData({ type: 'FeatureCollection', features: [] });
       map.setLayoutProperty('hospitals-dots', 'visibility', 'none');
       map.setLayoutProperty('counties-line', 'visibility', 'none');
-      map.fitBounds(US_BOUNDS, { ...homeView(), duration: 1000 });
+      goHome(1000);
       document.getElementById('result').style.display = 'none';
     });
 
