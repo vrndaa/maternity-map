@@ -7,6 +7,9 @@
   <link href="https://api.mapbox.com/mapbox-gl-js/v3.9.0/mapbox-gl.css" rel="stylesheet">
   <script src="https://api.mapbox.com/mapbox-gl-js/v3.9.0/mapbox-gl.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@turf/turf@7.1.0/turf.min.js"></script>
+  <!-- Your Mapbox token lives in config.js, which is NOT uploaded to GitHub.
+       On GitHub, the deploy workflow creates config.js from the MAPBOX_TOKEN secret. -->
+  <script src="config.js"></script>
   <!-- Fonts: Newsreader (headlines) + DM Mono (everything else), from Google Fonts -->
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -43,7 +46,7 @@
     #reset:hover { background: #fff; color: #000; }
 
     /* Key, inside the title box under "click anywhere" */
-    #key { margin-top: 14px; font-size: 14px; line-height: 1.35; display: flex; gap: 20px; }
+    #key { margin-top: 14px; font-size: 14px; line-height: 1.35; display: flex; flex-wrap: wrap; gap: 10px 20px; }
     #key .row { display: flex; gap: 8px; align-items: center; }
     #key .sw { width: 13px; height: 13px; flex: none; }
 
@@ -72,6 +75,7 @@
     <h1>How far to the nearest place to give birth?</h1>
     <p>CLICK ANYWHERE TO FIND OUT</p>
     <div id="key">
+     <div class="row"><span class="sw" style="background:#E86AA6"></span><span>Urban county</span></div>
       <div class="row"><span class="sw" style="background:#B8245E"></span><span>Rural county</span></div>
       <div class="row"><span class="sw" style="background:#fff;border-radius:50%;width:9px;height:9px"></span><span>Birthing hospital</span></div>
     </div>
@@ -104,7 +108,7 @@
   </div>
 
   <script>
-    mapboxgl.accessToken = 'pk.eyJ1IjoidnJuZGFhMTMiLCJhIjoiY213OWxqbmlkMDJnbDJ5b3BsNmwyNHZoMiJ9.d0dAcIXHsi97woAqD1OgNA';
+    mapboxgl.accessToken = window.MAPBOX_TOKEN;   // set in config.js
 
     // Your starting view. Keep the numbers you already tuned.
     const START_CENTER = [-97.5, 38.3];
