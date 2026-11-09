@@ -1,0 +1,43 @@
+# Publishes the map to GitHub Pages, adding the Mapbox token from a repository secret.
+# Runs every time you change a file on the main branch.
+name: Deploy map
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:        # lets you also run it by hand from the Actions tab
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Get the files
+        uses: actions/checkout@v4
+
+      - name: Build the site folder and create config.js from the secret
+        env:
+          MAPBOX_TOKEN: ${{ secrets.MAPBOX_TOKEN }}
+        run: |
+          if [ -z "$MAPBOX_TOKEN" ]; then echo "MAPBOX_TOKEN secret is missing"; exit 1; fi
+          mkdir _site
+          cp index.html *.geojson _site/
+          echo "window.MAPBOX_TOKEN = '${MAPBOX_TOKEN}';" > _site/config.js
+
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+      - id: deployment
+        uses: actions/deploy-pages@v4
